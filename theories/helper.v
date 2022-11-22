@@ -9,6 +9,13 @@ Section div.
   Admitted.
 End div.
 
+Section list.
+  Lemma merge_sort_length {A} R l {Dec : ∀ x y : A, Decision (R x y)} :
+    length (merge_sort R l) = length l.
+  Proof.
+  Admitted.
+End list.
+
 Section slice.
   Context {A : Type}.
   Implicit Types l : list A.

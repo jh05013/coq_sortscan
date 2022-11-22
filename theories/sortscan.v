@@ -2,140 +2,146 @@ Require Import ssreflect.
 From coq_sortscan Require Import helper ops.
 From stdpp Require Import sorting list.
 
-Context (R : relation nat)
-  `{∀ x y, Decision (R x y)}.
-Implicit Types disk mem : list nat.
+Context (R : relation nat) `{∀ x y, Decision (R x y)}.
+Implicit Types data : Data.
 
 Section Phase1.
-  Definition mem_sort mem (len : nat) :=
-    merge_sort R (take len mem) ++ drop len mem.
+  Program Definition mem_sort data (len : nat) :=
+    let M := mem data in
+    {| disk := disk data;
+      mem := merge_sort R (take len M) ++ drop len M |}.
+  Next Obligation. intros. apply (disk_length data). Qed.
+  Next Obligation.
+    intros. rewrite app_length merge_sort_length
+      take_length drop_length (mem_length data). lia.
+  Qed.
 
   (* sort disk[i..i+M) *)
-  Definition sort_disk disk mem (i len : nat) :=
-    let mem' := read_range_disk disk mem i len 0 in
-    let smem' := mem_sort mem' len in
-    (write_range_disk disk smem' 0 len i, smem').
+  Definition sort_disk data (i len : nat) :=
+    let data' := read_range_disk data i len 0 in
+    write_range_disk (mem_sort data' len) 0 len i.
   
-  Definition phase1_single disk mem (c : nat) :=
-    let M := length mem in
-    let i := c * M in
-    sort_disk disk mem i (M `min` (length disk - i)).
+  Definition phase1_single data (c : nat) :=
+    let i := c * CAP_MEM in
+    sort_disk data i (CAP_MEM `min` (CAP_DISK - i)).
 
-  Fixpoint phase1_loop disk mem (c : nat) :=
-    let (disk', mem') := phase1_single disk mem c in
+  Fixpoint phase1_loop data (c : nat) :=
     match c with
-    | O => (disk', mem')
-    | S c' => phase1_loop disk' mem' c'
+    | O => phase1_single data 0
+    | S c' => phase1_single (phase1_loop data c') (S c')
     end.
 
-  Definition phase1 disk mem :=
-    phase1_loop disk mem (length disk / length mem).
+  Definition phase1 data :=
+    phase1_loop data (CAP_DISK / CAP_MEM).
 
-  Lemma mem_sort_length mem len :
-    len ≤ length mem → length (mem_sort mem len) = length mem.
-  Proof.
-    intros H. unfold mem_sort.
+  Lemma mem_sort_take data len :
+    take len (mem (mem_sort data len)) =
+      merge_sort R (take len (mem data)).
   Admitted.
-
-  Lemma mem_sort_take mem len :
-    take len (mem_sort mem len) = merge_sort R (take len mem).
-  Admitted.
-
+(*
   Lemma mem_sort_app l l' len :
     length l = len →
     mem_sort (l ++ l') len = merge_sort R l ++ l'.
   Admitted.
-
-  Lemma sort_disk_sorted disk mem i len :
-    len ≤ length mem → i + len ≤ length disk →
-    let disk' := (sort_disk disk mem i len).1 in
-    slice disk' i len = merge_sort R (slice disk i len).
+*)
+  Lemma sort_disk_sorted data i len :
+    len ≤ CAP_MEM → i + len ≤ CAP_DISK →
+    slice (disk (sort_disk data i len)) i len =
+      merge_sort R (slice (disk data) i len).
   Proof.
-    simpl. intros Hmem Hdisk.
-    rewrite write_range_disk_lookup; auto.
-    { rewrite mem_sort_length; rewrite read_range_disk_length; auto. }
+    intros Hmem Hdisk.
+    rewrite write_range_disk_slice; auto.
     rewrite slice_0 mem_sort_take -slice_0.
     by rewrite read_range_disk_slice.
   Qed.
 
-  Lemma sort_disk_perm disk mem i len :
-    len ≤ length mem → i + len ≤ length disk →
-    (sort_disk disk mem i len).1 ≡ₚ disk.
+  Lemma sort_disk_perm data i len :
+    len ≤ CAP_MEM → i + len ≤ CAP_DISK →
+    disk (sort_disk data i len) ≡ₚ disk data.
   Proof.
-    intros. simpl.
-    assert (length (slice disk i len) = len) as Hlen
-      by by rewrite slice_length.
+    intros. unfold sort_disk.
+    assert (length (slice (disk data) i len) = len) as Hlen.
+      { rewrite slice_length; auto. by rewrite (disk_length data). }
+    rewrite write_range_disk_eq. simpl.
+    rewrite read_range_disk_disk slice_0.
     rewrite read_range_disk_eq take_0; simpl.
-    rewrite mem_sort_app; auto.
-    unfold write_range_disk. rewrite read_range_disk_eq.
-    rewrite {4} (slice_cut disk i len).
+    rewrite -{2 5} Hlen take_app drop_app.
+    assert (length (merge_sort R (slice (disk data) i len)) = len) as HlenM.
+      { rewrite merge_sort_length slice_length; auto.
+        by rewrite (disk_length data). }
+    rewrite -{1} HlenM take_app.
+    rewrite {4} (slice_cut (disk data) i len).
     do 2 (apply Permutation_app; auto).
-    rewrite slice_0.
-    assert (len = length (merge_sort R (slice disk i len))) as HMS.
-    { rewrite -{1} Hlen. apply Permutation_length.
-      symmetry. apply merge_sort_Permutation. }
-    rewrite {1} HMS. rewrite take_app.
     apply merge_sort_Permutation.
   Qed.
 
-  Lemma sort_disk_length disk mem i len :
-    length (sort_disk disk mem i len).1 = length disk.
+  Lemma phase1_single_spec data c :
+    Transitive R → Total R →
+    c ≤ CAP_DISK / CAP_MEM →
+    let data' := phase1_single data c in
+    disk data' ≡ₚ disk data ∧
+    StronglySorted R (slice (disk data') (c * CAP_MEM) CAP_MEM).
   Proof.
-    simpl. unfold write_range_disk.
-    by rewrite read_range_disk_length.
-  Qed.
-
-  Lemma phase1_single_spec disk mem c :
-    length mem ≠ 0 → Transitive R → Total R →
-    let M := length mem in
-    c ≤ length disk / M →
-    let disk' := (phase1_single disk mem c).1 in
-    disk' ≡ₚ disk ∧
-    StronglySorted R (slice disk' (c * M) M).
-  Proof.
-    unfold phase1_single. intros Hmemnil TRANS TOT Hc.
-    assert (c * length mem +
-      length mem `min` (length disk - c * length mem)
-      ≤ length disk
+    unfold phase1_single. intros TRANS TOT Hc.
+    assert (c * CAP_MEM +
+      CAP_MEM `min` (CAP_DISK - c * CAP_MEM)
+      ≤ CAP_DISK
     ) as Hcle.
-    { assert (c * length mem ≤ length disk); try lia.
-      trans (length disk `div` length mem * length mem).
+    { assert (c * CAP_MEM ≤ CAP_DISK); try lia.
+      trans (CAP_DISK `div` CAP_MEM * CAP_MEM).
       - by apply PeanoNat.Nat.mul_le_mono_r.
-      - rewrite div_mult_sub_mod; lia.
+      - rewrite div_mult_sub_mod; try lia. by unfold CAP_MEM.
     }
     split.
     - apply sort_disk_perm; lia.
-    - rewrite slice_minlen sort_disk_length.
+    - rewrite slice_minlen disk_length.
       rewrite sort_disk_sorted; try lia.
       by apply StronglySorted_merge_sort.
   Qed.
 
-  Lemma phase1_loop_spec disk mem c :
-    length mem ≠ 0 → Transitive R → Total R →
-    let M := length mem in
-    let disk' := (phase1_loop disk mem c).1 in
-    disk' ≡ₚ disk ∧
-    ∀ i, i ≤ c → StronglySorted R (slice disk' (i * M) M).
+  Lemma phase1_loop_spec data c :
+    Transitive R → Total R →
+    c ≤ CAP_DISK / CAP_MEM →
+    let data' := phase1_loop data c in
+    disk data' ≡ₚ disk data ∧
+    ∀ i, i ≤ c → StronglySorted R (slice (disk data') (i * CAP_MEM) CAP_MEM).
+  Proof.
+    intros TRANS TOT Hc.
+    induction c; intros.
+    - assert (disk data' ≡ₚ disk data ∧
+        StronglySorted R (slice (disk data') 0 CAP_MEM)
+      ) as [HP HSS].
+      { apply phase1_single_spec; auto. }
+      split; auto. intros. destruct i; auto. lia.
+    - simpl in data'.
+      assert (
+        disk data' ≡ₚ disk (phase1_loop data c)
+        ∧ StronglySorted R (slice (disk data') (S c * CAP_MEM) CAP_MEM)
+      ) as [HP HSS].
+        { apply phase1_single_spec; auto. }
+      assert (c ≤ CAP_DISK `div` CAP_MEM) as Hc' by lia.
+      apply IHc in Hc' as [HP0 HSS0].
+      split. { etrans; eauto. }
+      intros. destruct (decide (i ≤ c)).
+      + apply HSS0 in l. unfold data'. admit.
+      + assert (i = S c) by lia. by subst.
   Admitted.
 
-  Lemma phase1_spec (disk mem : list nat) :
-    length mem ≠ 0 → Transitive R → Total R →
-    let M := length mem in
-    let disk' := (phase1 disk mem).1 in
-    disk' ≡ₚ disk ∧
-    ∀ i, StronglySorted R (slice disk' (i * M) M).
+  Lemma phase1_spec data :
+    Transitive R → Total R →
+    let data' := phase1 data in
+    disk data' ≡ₚ disk data ∧
+    ∀ i, StronglySorted R (slice (disk data') (i * CAP_MEM) CAP_MEM).
   Proof.
-    intros Hmemnil TRANS TOT.
-    destruct (phase1_loop_spec disk mem (length disk / length mem))
+    intros TRANS TOT.
+    destruct (phase1_loop_spec data (CAP_DISK / CAP_MEM))
       as [HP HSS]; auto.
     intros. split. { apply HP. }
-    intros. destruct (decide (i ≤ length disk `div` length mem)).
+    intros. destruct (decide (i ≤ CAP_DISK `div` CAP_MEM)).
     - by apply HSS.
-    - rewrite slice_to_nil. 2: constructor.
-      replace (length disk') with (length disk) by admit.
-      replace (length mem) with M in n; auto.
-      assert (i*M ≥ S (length disk `div` M)*M) by admit.
-      assert (S (length disk `div` M)*M ≥ length disk) by admit.
+    - rewrite slice_to_nil. 2: constructor. rewrite disk_length.
+      assert (i*CAP_MEM ≥ S (CAP_DISK `div` CAP_MEM)*CAP_MEM) by admit.
+      assert (S (CAP_DISK `div` CAP_MEM)*CAP_MEM ≥ CAP_DISK) by admit.
       lia.
   Admitted.
 End Phase1.
