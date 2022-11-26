@@ -147,5 +147,28 @@ Section Phase1.
 End Phase1.
 
 Section Phase2.
+  Program Definition fill_zero data :=
+    {| disk := disk data;
+      mem := replicate CAP_MEM 0 |}.
+  Next Obligation. intros. apply disk_length. Qed.
+  Next Obligation. intros. apply replicate_length. Qed.
 
+  Definition 
+
+  Definition find_min data :=
+    0.
+
+  Fixpoint phase2_loop data (rem : nat) :=
+    match rem with
+    | O => []
+    | S rem' =>
+        let chunk_id := find_min data in
+        let i := (CAP_MEM * chunk_id) + read_mem data chunk_id in
+        let data' := read_disk data i (CAP_MEM - 1) in
+        let v := read_mem data' (CAP_MEM - 1) in
+        let data'' := write_const_mem data' chunk_id (S i) in
+        v :: phase2_loop data'' rem'
+    end.
+
+  Definition phase2 data := phase2_loop data CAP_DISK.
 End Phase2.
