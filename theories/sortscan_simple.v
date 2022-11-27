@@ -22,9 +22,18 @@ Section sorted.
   Definition is_min_of_join L v :=
 	∃ l, merge_sort R (join_lists L) = v :: l.
 
+  Lemma is_min_of_join_equiv L v :
+    is_min_of_join L v ↔
+	∀ v' l, v' ∈ l → l ∈ L → R v v'.
+  Proof.
+  Admitted.
+
   Lemma is_min_of_join_cons v' l L v :
     is_min_of_join L v → R v v' →
 	is_min_of_join ((v'::l) :: L) v'.
+  Proof.
+	intros Hmin HR. rewrite is_min_of_join_equiv in Hmin.
+	rewrite is_min_of_join_equiv. intros a la Ha Hla.
   Admitted.
 
   Lemma is_min_of_join_cons2 v' l L v :
@@ -72,6 +81,11 @@ Section sorted.
 
   Lemma StronglySorted_cons v l :
     StronglySorted R (v :: l) → StronglySorted R l.
+  Admitted.
+
+  Lemma StronglySorted_change_head v' v l :
+    StronglySorted R (v :: l) → R v' v →
+	StronglySorted R (v' :: l).
   Admitted.
 End sorted.
 
@@ -152,7 +166,7 @@ Section Phase2.
     L !! i = Some (v :: l) → look_head L i = Some v.
   Proof. intros H. unfold look_head. by rewrite H. Qed.
 
-  Lemma phase2_first_correct L:
+  Lemma phase2_first_correct `{!Transitive R, !Total R} L:
     num_elements L > 0 → is_sorted_lists L →
 	let i := find_min L in
 	∃ v l,
@@ -172,55 +186,53 @@ Section Phase2.
 		simpl. rewrite look_head_cons. erewrite look_head_Some; eauto.
 		assert (is_min_of_join L' v') as Hminjoin'. { eexists. eauto. }
 		destruct (bool_decide (R v' a)) eqn: ER.
-		* exists a, l. split; auto. simpl.
+		* apply bool_decide_eq_true_1 in ER.
+		  exists a, l. split; auto. simpl.
 		  assert (is_min_of_join ((a::l) :: L') a) as Hminjoin.
-		  { eapply is_min_of_join_cons; eauto. admit. }
+		  { eapply is_min_of_join_cons; eauto. }
 		  destruct Hminjoin as [rest' Hrest'2].
 		  simpl in Hrest'2. rewrite Hrest'2.
 		  assert (rest' = merge_sort R (l ++ join_lists L')) as Heq.
 		    2: by rewrite Heq.
 		  assert (StronglySorted R rest') as SSrest'.
-		  { admit. }
+		  { apply (StronglySorted_cons v').
+		    apply (StronglySorted_change_head _ a); auto.
+			rewrite -Hrest'2. by apply StronglySorted_merge_sort. }
 		  apply merge_sort_Permutation_eq,
 		    Permutation_cons_inv, merge_sort_equivalent in Hrest'2.
 		  rewrite (merge_sort_identity rest') in Hrest'2; auto.
-		* exists v', l'. split; auto. simpl.
+		* apply bool_decide_eq_false_1, total_not in ER.
+		  exists v', l'. split; auto. simpl.
 		  assert (is_min_of_join ((a::l) :: L') v') as Hminjoin.
-		  { eapply is_min_of_join_cons2; eauto. admit. }
+		  { eapply is_min_of_join_cons2; eauto. }
 		  destruct Hminjoin as [rest' Hrest'2]. rewrite Hrest'2.
 		  assert (rest' = merge_sort R (a::l ++
 		    join_lists (<[find_min L':=l']> L'))
 		  ) as Heq.
 		    2: by rewrite Heq.
 		  assert (StronglySorted R rest') as SSrest'.
-		  { admit. }
-		  assert (
-			v' :: join_lists (<[find_min L':=l']> L')
-			≡ₚ join_lists L'
-		  ) as Pv' by by apply join_lists_pop_Permutation.
-		  assert (
-			v' :: (a :: l) ++ join_lists (<[find_min L':=l']> L')
-			≡ₚ join_lists ((a :: l) :: L')
-		  ) as Pj.
-		  { etrans. 1: apply Permutation_middle.
-		    simpl. constructor. by eapply Permutation_app. }
-		  assert (
-			v' :: rest'
-			≡ₚ v' :: ((a :: l) ++ join_lists (<[find_min L':=l']> L'))
-		  ) as Prj.
-		  { symmetry. etrans. 1: apply Pj. rewrite -Hrest'2.
-		    symmetry. apply merge_sort_Permutation. }
-		  apply Permutation_cons_inv in Prj.
+		  { apply (StronglySorted_cons v'). rewrite -Hrest'2.
+		    by apply StronglySorted_merge_sort. }
 		  apply (StronglySorted_unique R); auto.
-		  { apply StronglySorted_merge_sort. admit. admit. }
-		  etrans. 1: apply Prj. symmetry. apply merge_sort_Permutation.
+		    1: by apply StronglySorted_merge_sort.
+		  eapply Permutation_cons_inv. instantiate (1:=v').
+		  rewrite -Hrest'2.
+		  etrans. 1: apply merge_sort_Permutation.
+		  etrans. 2: apply Permutation_cons. 2: eauto.
+		  2: symmetry; apply merge_sort_Permutation.
+		  etrans. 1: {
+			symmetry; apply (join_lists_pop_Permutation
+			  _ (S (find_min L'))
+			). by rewrite lookup_cons.
+		  }
+		  auto.
 	  + simpl. rewrite look_head_cons look_head_empty; try lia.
 	    exists a, l. split; auto. simpl.
 		rewrite join_lists_empty; [lia|]. rewrite app_nil_r.
 		assert (StronglySorted R (a :: l)) as SS by by inversion Hsort.
 		repeat rewrite merge_sort_identity; auto.
 		by apply StronglySorted_cons in SS.
-	Admitted.
+	Qed.
 
   Lemma phase2_correct {V} L (f : A → V → V) (start : V) :
     is_sorted_lists L →
