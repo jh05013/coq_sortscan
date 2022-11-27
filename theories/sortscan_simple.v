@@ -4,6 +4,7 @@ From stdpp Require Import sorting list.
 
 Context {A} (R : relation A) `{∀ x y, Decision (R x y)}
   `{!Total R, !Transitive R, !AntiSymm (=) R}.
+Implicit Type (mem : list A).
 Implicit Type (L : list (list A)).
 
 Section sorted.
@@ -90,6 +91,44 @@ Section sorted.
 End sorted.
 
 Section Phase1.
+  Fixpoint phase1_loop mem M (z : nat) :=
+	match z with
+	| O => ([] : list (list A))
+	| S z' => (merge_sort R (take M mem)) ::
+	    phase1_loop (drop M mem) M z'
+	end.
+
+  Definition phase1 mem M :=
+	phase1_loop mem M (S (length mem / M)).
+
+  Lemma phase1_loop_correct `{!Transitive R, !Total R} mem M z :
+    0 < M → length mem ≤ M * z →
+	let L := phase1_loop mem M z in
+	is_sorted_lists L ∧ join_lists L ≡ₚ mem.
+  Proof.
+	revert mem. simpl.
+	induction z; intros mem HM Hz; simpl; split.
+	- constructor.
+	- destruct mem; auto. simpl in Hz. lia.
+	- constructor.
+	  + by apply StronglySorted_merge_sort.
+	  + apply IHz; auto. rewrite drop_length. lia.
+	- assert (mem = take M mem ++ drop M mem) as HTD
+	    by by rewrite take_drop.
+	  rewrite {3} HTD. apply Permutation_app.
+	  + apply merge_sort_Permutation.
+	  + apply IHz; auto. rewrite drop_length. lia.
+  Qed.
+
+  Lemma phase1_correct mem M :
+    0 < M →
+	let L := phase1 mem M in
+	is_sorted_lists L ∧ join_lists L ≡ₚ mem.
+  Proof.
+	simpl. unfold phase1. intros HM.
+	apply phase1_loop_correct; auto.
+	(* prove n ≤ M * S(n/M) *)
+  Admitted.
 End Phase1.
 
 Section Phase2.
@@ -252,7 +291,21 @@ Section Phase2.
 End Phase2.
 
 Section combine.
+  Definition TPMMS {V} mem M (f : A → V → V) (start : V) :=
+	phase2 (phase1 mem M) f start.
 
+  Lemma TPMMS_correct {V} mem M (f : A → V → V) (start : V) :
+    0 < M →
+	TPMMS mem M f start = foldr f start (merge_sort R mem).
+  Proof.
+	intros HM. unfold TPMMS.
+	apply (phase1_correct mem) in HM as [ISS HP].
+	apply (phase2_correct _ f start) in ISS.
+	rewrite ISS.
+	replace (merge_sort R (join_lists (phase1 mem M)))
+	  with (merge_sort R mem); auto.
+	apply merge_sort_equivalent. by symmetry.
+  Qed.
 End combine.
 
 Section query.
