@@ -8,5 +8,5 @@
 theories/helper.v
 theories/sortscan_simple.v
 
-theories/ops.v
-theories/sortscan.v
+#theories/ops.v
+#theories/sortscan.v
